@@ -148,15 +148,14 @@ public class Interpreter {
         }
         if (soundTimer > 0) {
             soundTimer--;
+            beep();
         }
     }
 
     public void beep() {
-        if (soundTimer > 0) {
-            // This existing is hilarious to me
-            // Like there is a whole function for just making a beep sound.
-            Toolkit.getDefaultToolkit().beep();
-        }
+        // This existing is hilarious to me
+        // Like there is a whole function for just making a beep sound.
+        Toolkit.getDefaultToolkit().beep();
     }
 
     // --- FDE Cycle stuff ---
@@ -219,7 +218,7 @@ public class Interpreter {
             case 0x1 -> programCounter = opcode & 0x0FFF;
             case 0x2 -> {
                 // 0x2NNN: Call subroutine at NNN
-                // It's different than 0x1NNN because it needs to save the current program counter
+                // It's different from 0x1NNN because it needs to save the current program counter
                 // so that it can return to it later. This is done by pushing the current program
                 // Push the current program counter onto the stack
                 push(programCounter);

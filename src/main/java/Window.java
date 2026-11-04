@@ -9,7 +9,7 @@ import java.io.IOException;
 import java.util.logging.Logger;
 
 public class Window {
-    private final Interpreter interpreter; // The CHIP-8 interpreter
+    private Interpreter interpreter; // The CHIP-8 interpreter
 
     private long window; // GLFW window handle
 
@@ -25,20 +25,59 @@ public class Window {
         display = new Display();
         displayRenderer = new DisplayRenderer();
         keypad = new Keypad();
-
-        interpreter = new Interpreter(display, keypad);
     }
 
+    // Assumes CHIP-8 interpreter by default
+    public Window(String filePath) {
+        display = new Display();
+        displayRenderer = new DisplayRenderer();
+        keypad = new Keypad();
+
+        use("CHIP");
+        loadROM(filePath);
+    }
+
+    public Window(String interpreter, String filePath) {
+        display = new Display();
+        displayRenderer = new DisplayRenderer();
+        keypad = new Keypad();
+
+        use(interpreter);
+        loadROM(filePath);
+    }
+
+    public String currentROMPath;
+
+    // Load the ROM into the interpreter's memory
     public void loadROM(String filePath) {
         try {
             interpreter.loadROM(filePath);
+            currentROMPath = filePath;
         } catch (IOException e) {
             Logger.getLogger(Window.class.getName())
                     .severe("Failed to load ROM: " + e.getMessage());
         }
     }
 
+    // What interpreter should be used
+    public void use(String choice) {
+        switch (choice) {
+            case "CHIP" -> interpreter = new Interpreter(display, keypad);
+            // TODO: Change this when the SUPER Interpreter is actually made
+            case "SCHIP" -> interpreter = new Interpreter(display, keypad);
+            default -> throw new IllegalArgumentException("Unknown interpreter: " + choice);
+        }
+    }
+
     public void run() {
+        if (interpreter == null) {
+            throw new RuntimeException("Interpreter not specified (run `window.use(interpreter)` first)");
+        }
+
+        if (currentROMPath == null) {
+            throw new RuntimeException("No ROM has been set (run `window.loadROM(pathToROM)` first)");
+        }
+
         // Print errors to System.err which is like System.out but for errors.
         GLFWErrorCallback.createPrint(System.err).set();
 
