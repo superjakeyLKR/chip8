@@ -42,7 +42,7 @@ public class Interpreter {
 
     private int[] registers = new int[16]; // 16 general purpose registers (V0 to VF)
 
-    // Because bytes are signed in Java, we need to use explicit casting
+    // Because bytes are signed in Java, we need to selectInterpreter explicit casting
     // to ensure they are treated as unsigned values for values
     // greater than 127 (0x7F). This is important for the CHIP-8 interpreter,
     // as it uses 8-bit unsigned values.

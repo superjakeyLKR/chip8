@@ -1,9 +1,19 @@
+import gui.Launcher;
+import javafx.application.Application;
+
 void main(String[] args) {
+    if (args.length == 0) {
+        Application.launch(Launcher.class);
+
+        // It will try to run the rest of it after closing the window
+        return;
+    }
+
     final List<String> help = List.of("help", "-help", "-h", "?");
 
-    if (args.length == 0 || help.contains(args[0])) {
+    if (help.contains(args[0])) {
         System.out.println("Usage: java -jar chip8.jar <INTERPRETER> <FILE>");
-        System.out.println("<INTERPRETER>: Which interpreter you'd like to use");
+        System.out.println("<INTERPRETER>: Which interpreter you'd like to selectInterpreter");
         System.out.println("CHIP: The base CHIP-8 interpreter");
         System.out.println("SCHIP: The Super CHIP-8 interpreter");
         System.out.println("<FILE>: The filepath to the file to run");
@@ -20,7 +30,7 @@ void main(String[] args) {
 
     // Or you could just do:
     // Window window = new Window();
-    // window.use(args[0]);
+    // window.selectInterpreter(args[0]);
     // window.loadROM(args[1]);
 
     window.run();

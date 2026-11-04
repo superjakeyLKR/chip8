@@ -1,5 +1,6 @@
 import core.Display;
 import core.Interpreter;
+import core.InterpreterType;
 import core.Keypad;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.glfw.GLFWErrorCallback;
@@ -33,7 +34,7 @@ public class Window {
         displayRenderer = new DisplayRenderer();
         keypad = new Keypad();
 
-        use("CHIP");
+        selectInterpreter(InterpreterType.CHIP_8);
         loadROM(filePath);
     }
 
@@ -42,7 +43,7 @@ public class Window {
         displayRenderer = new DisplayRenderer();
         keypad = new Keypad();
 
-        use(interpreter);
+        selectInterpreter(interpreter);
         loadROM(filePath);
     }
 
@@ -60,18 +61,22 @@ public class Window {
     }
 
     // What interpreter should be used
-    public void use(String choice) {
-        switch (choice) {
-            case "CHIP" -> interpreter = new Interpreter(display, keypad);
+    public void selectInterpreter(String choice) {
+        selectInterpreter(InterpreterType.fromString(choice));
+    }
+
+    public void selectInterpreter(InterpreterType interpreterType) {
+        switch (interpreterType) {
+            case CHIP_8 -> interpreter = new Interpreter(display, keypad);
             // TODO: Change this when the SUPER Interpreter is actually made
-            case "SCHIP" -> interpreter = new Interpreter(display, keypad);
-            default -> throw new IllegalArgumentException("Unknown interpreter: " + choice);
+            case SUPER_CHIP -> interpreter = new Interpreter(display, keypad);
+            default -> throw new IllegalArgumentException("Unknown interpreter: " + interpreterType.getDisplayName());
         }
     }
 
     public void run() {
         if (interpreter == null) {
-            throw new RuntimeException("Interpreter not specified (run `window.use(interpreter)` first)");
+            throw new RuntimeException("Interpreter not specified (run `window.selectInterpreter(interpreter)` first)");
         }
 
         if (currentROMPath == null) {
@@ -106,7 +111,7 @@ public class Window {
         // Make the OpenGL context current
         GLFW.glfwMakeContextCurrent(window);
 
-        // Initialize OpenGL capabilities, to use OpenGL functions.
+        // Initialize OpenGL capabilities, to selectInterpreter OpenGL functions.
         GL.createCapabilities();
 
         // Initialize the display renderer,
