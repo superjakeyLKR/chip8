@@ -1,46 +1,89 @@
-package core;
+package core.interpreter;
 
+import core.Display;
+import core.Keypad;
+import core.Quirks;
 import errors.CHIP8InterpreterError;
 import errors.CHIP8InvalidOpcodeError;
 
 import java.awt.Toolkit;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.Random;
 
-public class Interpreter {
+public class Chip8Interpreter {
     // --- Initialization ---
 
-    private final Display display;
-    private final Keypad keypad;
-    private final Random random;
+    protected final Display display;
+    protected final Keypad keypad;
+    protected final Random random;
 
-    public Interpreter(Display display, Keypad keypad) {
+    // This is more so for the SuperCHIP interpreter,
+    // as the base interpreter doesn't have the concept of
+    // an `exit` command.
+    protected boolean running = true;
+
+    // What quirks are currently enabled
+    // Basically, not every CHIP-8 is made equal
+    // and a bunch of different systems do things differently
+    protected Map<Quirks, Boolean> quirks = new EnumMap<>(Quirks.class);
+
+    // See Quirks.DISPLAY_WAIT
+    public boolean displayDrawPending = false;
+
+    public Chip8Interpreter(Display display, Keypad keypad) {
         this.display = display;
         this.keypad = keypad;
 
         this.random = new Random();
 
         loadFontSet();
+
+        enableAllQuirks();
+
+        // This took way to long to make work
+        // setQuirk(Quirks.CLIP_SPRITES, false);
     }
 
     // If you want to run it without the Window class
-    public Interpreter() {
+    public Chip8Interpreter() {
         this.display = new Display();
         this.keypad = new Keypad();
 
         this.random = new Random();
 
         loadFontSet();
+
+        enableAllQuirks();
+    }
+
+    public boolean isRunning() {
+        return running;
+    }
+
+    public boolean isQuirkEnabled(Quirks quirk) {
+        return quirks.getOrDefault(quirk, false);
+    }
+
+    public void setQuirk(Quirks quirk, boolean enabled) {
+        quirks.put(quirk, enabled);
+    }
+
+    public void enableAllQuirks() {
+        for (Quirks quirk : Quirks.values()) {
+            quirks.put(quirk, true);
+        }
     }
 
     // --- Memory ---
 
     public static final int MEMORY_SIZE = 4096; // 4KB of memory
 
-    private byte[] memory = new byte[MEMORY_SIZE];
+    protected byte[] memory = new byte[MEMORY_SIZE];
 
-    private int[] registers = new int[16]; // 16 general purpose registers (V0 to VF)
+    protected int[] registers = new int[16]; // 16 general purpose registers (V0 to VF)
 
     // Because bytes are signed in Java, we need to selectInterpreter explicit casting
     // to ensure they are treated as unsigned values for values
@@ -73,7 +116,7 @@ public class Interpreter {
     // so the int value of a byte with all bits set is -1. To get the correct value, we
     // need to mask the int with 0xFF, which is 00000000 00000000 00000000 11111111
     // This removes everything but the last 8 bits, which is what we want.
-    private int toInt(byte b) {
+    protected int toInt(byte b) {
         return b & 0xFF;
     }
 
@@ -112,7 +155,7 @@ public class Interpreter {
         stack[stackPointer++] = address & 0xFFF;
     }
 
-    private int pop() {
+    protected int pop() {
         if (stackPointer == 0) {
             throw new RuntimeException("CHIP-8: Stack underflow");
         }
@@ -163,14 +206,18 @@ public class Interpreter {
     private final int START_OF_MEMORY = 0x200; // Start of program memory (512 in decimal)
 
     // Where the next instruction to be executed is located in memory
-    private int programCounter = START_OF_MEMORY;
+    protected int programCounter = START_OF_MEMORY;
 
     // I is a special register that holds memory addresses.
     // It's used for operations that involve memory,
     // such as loading and storing data.
-    private int I = 0;
+    protected int I = 0;
 
     public void cycle() {
+        if (isQuirkEnabled(Quirks.DISPLAY_WAIT) && displayDrawPending) {
+            return; // Don't do CPU cycles when waiting to draw something
+        }
+
         // Fetch the next instruction from memory
         int opcode = fetch();
         // Decode and execute the instruction
@@ -199,19 +246,7 @@ public class Interpreter {
         // E.g: 0x0 is system instructions, 0x1 is jump instructions, etc.
         int instruction = (opcode & 0xF000) >> 12;
         switch (instruction) {
-            case 0x0 -> {
-                // 0x00E0: Clear the display
-                if (opcode == 0x00E0) {
-                    // Clear the display
-                    display.clear();
-                } else if (opcode == 0x00EE) {
-                    // 0x00EE: Return from a subroutine
-                    // Pop the address from the stack and set the program counter to that address.
-                    programCounter = pop();
-                } else {
-                    throw new CHIP8InvalidOpcodeError(opcode);
-                }
-            }
+            case 0x0 -> executeZeroInstruction(opcode);
             // 0x1NNN: Jump to address NNN
             // Get the last 12 bits of the opcode
             // and set the program counter to that address.
@@ -280,38 +315,75 @@ public class Interpreter {
                 switch (n) {
                     // None of these operations should edit the value in VY
                     case 0x0 -> registers[x] = registers[y]; // Set VX to the value of VY
-                    case 0x1 -> registers[x] |= registers[y]; // Set VX to VX OR VY
-                    case 0x2 -> registers[x] &= registers[y]; // Set VX to VX AND VY
-                    case 0x3 -> registers[x] ^= registers[y]; // Set VX to VX XOR VY
+                    // A quirk of CHIP-8 is that these logic operations
+                    // should reset VF to 0, but it doesn't do that on the
+                    // SuperCHIP, hence the weirdness.
+                    // See Quirks.
+                    case 0x1, 0x2, 0x3 -> eightXYLogic(x, y, n);
+
+                    // According to 4-flags.ch8, there used to be a pretty big oversight
+                    // with these instructions. If VX or VY were themselves VF,
+                    // then it was exceedingly easy to override their values,
+                    // which isn't how it's supposed to do it.
+
                     case 0x4 -> {
                         // Add VY to VX. VF is set to 1 if there's a carry, and to 0 if there isn't.
-                        int sum = registers[x] + registers[y];
-                        registers[0xF] = sum > 255 ? 1 : 0; // Check for carry
+                        int vx = registers[x];
+                        int vy = registers[y];
+
+                        int sum = vx + vy;
+
                         registers[x] = sum & 0xFF; // Keep only the last 8 bits
+                        registers[0xF] = sum > 255 ? 1 : 0; // Check for carry
                     }
                     case 0x5 -> {
-                        // Subtract VY from VX. VF is set to 0 if there's a borrow, and to 1 if there isn't.
-                        registers[0xF] = registers[x] >= registers[y] ? 1 : 0; // Check for borrow
-                        registers[x] = (registers[x] - registers[y]) & 0xFF; // Keep only the last 8 bits
+                        // Subtract VX from VY. VF is set to 0 if there's a borrow, and to 1 if there isn't.
+                        int vx = registers[x];
+                        int vy = registers[y];
+
+                        int difference = vx - vy;
+
+                        registers[x] = difference & 0xFF; // Keep only the last 8 bits
+                        registers[0xF] = vx >= vy ? 1 : 0; // Check for borrow
                     }
                     case 0x6 -> {
-                        // !!VAGUEPOST ALARM!!
-                        // This isn't well-defined and is different on different computers
-                        // So this is how I'm doing it.
+                        // No more vaguepost alarm, we've got a quirk for this now!
                         // Store the least significant bit of VX in VF and then shift VX to the right by 1.
-                        registers[0xF] = registers[x] & 0x1; // Store LSB in VF
-                        registers[x] >>= 1; // Shift right by 1
+                        int vx = registers[x];
+
+                        if (isQuirkEnabled(Quirks.SHIFT_VY)) {
+                            // Instead of shifting VX, we shift VY and set VX to it
+                            // It makes y actually useful in this instruction
+                            registers[x] = registers[y] >> 1;
+                        } else {
+                            registers[x] >>= 1; // Shift right by 1
+                        }
+
+                        registers[0xF] = vx & 0x1; // Store LSB in VF
                     }
                     case 0x7 -> {
+                        // Evil version of 0x8XY5
                         // Set VX to VY minus VX. VF is set to 0 if there's a borrow, and to 1 if there isn't.
-                        registers[0xF] = registers[y] >= registers[x] ? 1 : 0; // Check for borrow
-                        registers[x] = (registers[y] - registers[x]) & 0xFF; // Keep only the last 8 bits
+                        int vx = registers[x];
+                        int vy = registers[y];
+
+                        int difference = vy - vx;
+
+                        registers[x] = difference & 0xFF; // Keep only the last 8 bits
+                        registers[0xF] = vy >= vx ? 1 : 0; // Check for borrow
                     }
                     case 0xE -> {
                         // Yeah, see 0x8XY6
                         // Store the most significant bit of VX in VF and then shift VX to the left by 1.
-                        registers[0xF] = (registers[x] & 0x80) >> 7;
-                        registers[x] = (registers[x] << 1) & 0xFF; // Shift left by 1
+                        int vx = registers[x];
+
+                        if (isQuirkEnabled(Quirks.SHIFT_VY)) {
+                            // You get the point
+                            registers[x] = (registers[y] << 1) & 0xFF;
+                        } else {
+                            registers[x] = (registers[x] << 1) & 0xFF; // Shift left by 1
+                        }
+                        registers[0xF] = (vx & 0x80) >> 7;
                     }
                     default -> throw new CHIP8InvalidOpcodeError(opcode);
                 }
@@ -331,10 +403,19 @@ public class Interpreter {
             // 0xANNN: Set I to the address NNN
             // Get the last 12 bits of the opcode and set I to that address.
             case 0xA -> I = opcode & 0x0FFF;
-            // !!ALSO VAGUEPOST WARNING!!
-            // 0xBNNN (NOT 0xBXNN): Jump to NNN plus V0
-            // (If it were 0xBXNN, it would jump to XNN plus VX)
-            case 0xB -> programCounter = (opcode & 0x0FFF) + registers[0x0];
+            // Yep, this has a quirk too now
+            // 0xBNNN (OR 0xBXNN): Jump to NNN plus V0
+            // (If it were 0xBXNN, it would jump to NN plus VX)
+            case 0xB -> {
+                if (isQuirkEnabled(Quirks.JUMP_WITH_VX)) {
+                    int x = opcode & 0x0F00 >> 8;
+                    int nn = opcode & 0x0FFF;
+
+                    programCounter = nn + registers[x];
+                } else {
+                    programCounter = (opcode & 0x0FFF) + registers[0x0];
+                }
+            }
 
             case 0xC -> {
                 // 0xCXNN: Generate a random number and logical AND it with NN
@@ -344,20 +425,7 @@ public class Interpreter {
                 // 0-255 is every value an 8-bit number could be
                 registers[x] = random.nextInt(256) & nn;
             }
-            case 0xD -> {
-                // 0xDXYN: Draw a sprite at coordinate (VX, VY)
-                // with width 8 pixels and height N pixels.
-                // Note that X and Y refer to the registers VX and VY, which hold the x and y coordinates.
-                // The sprite is located in memory at the address stored in I.
-                // VF is set to 1 if any pixels are flipped from set to unset when the sprite is drawn,
-                // and to 0 if that doesn't happen.
-
-                int x = registers[(opcode & 0x0F00) >> 8]; // Get VX
-                int y = registers[(opcode & 0x00F0) >> 4]; // Get VY
-                int height = opcode & 0x000F; // Get N
-
-                registers[0xF] = drawSprite(x, y, height);
-            }
+            case 0xD -> executeDrawInstruction(opcode);
             case 0xE -> {
                 // 0xEXNN: Skips based on the state of the key corresponding to the value
                 // in VX
@@ -382,87 +450,169 @@ public class Interpreter {
                     default -> throw new CHIP8InvalidOpcodeError(opcode);
                 }
             }
-            case 0xF -> {
-                // 0xFXNN: A bunch of stuff. Timers, key inputs, memory
-                int x = (opcode & 0x0F00) >> 8;
-                int nn = opcode & 0x00FF;
+            case 0xF -> executeFInstruction(opcode);
+            default -> throw new CHIP8InvalidOpcodeError(opcode);
+        }
+    }
 
-                switch (nn) {
-                    // Set VX to the delay timer
-                    case 0x07 -> registers[x] = delayTimer & 0xFF;
-                    // Set the delay timer to VX
-                    case 0x15 -> delayTimer = registers[x];
-                    // Set the sound timer to VX
-                    case 0x18 -> soundTimer = registers[x];
-                    // Add VX to I, and set VF to 1 if it would "overflow" above 0x0FFF
-                    // It's not actually overflowing, but it shouldn't be any higher than that.
-                    case 0x1E -> {
-                        I += registers[x];
-                        registers[0xF] = 0;
+    protected void executeZeroInstruction(int opcode) {
+        // 0x00E0: Clear the display
+        if (opcode == 0x00E0) {
+            // Clear the display
+            display.clear();
+        } else if (opcode == 0x00EE) {
+            // 0x00EE: Return from a subroutine
+            // Pop the address from the stack and set the program counter to that address.
+            programCounter = pop();
+        } else {
+            throw new CHIP8InvalidOpcodeError(opcode);
+        }
+    }
 
-                        if (I > 0x0FFF) {
-                            I = 0x0FFF;
-                            registers[0xF] = 1;
-                        }
-                    }
-                    // Halts until any key is pressed
-                    // Puts its hex value in VX when it is pressed
-                    case 0x0A -> {
-                        int pressedKey = keypad.getPressedKey();
+    protected void executeDrawInstruction(int opcode) {
+        // 0xDXYN: Draw a sprite at coordinate (VX, VY)
+        // with width 8 pixels and height N pixels.
+        // Note that X and Y refer to the registers VX and VY, which hold the x and y coordinates.
+        // The sprite is located in memory at the address stored in I.
+        // VF is set to 1 if any pixels are flipped from set to unset when the sprite is drawn,
+        // and to 0 if that doesn't happen.
 
-                        if (pressedKey == -1) {
-                            programCounter -= 2;
-                        } else {
-                            registers[x] = x;
-                        }
-                    }
-                    // Make I point to VX's character in the font
-                    // Each character in the font is 5 bytes long
-                    case 0x29 -> I = FONT_SET_START_ADDRESS + registers[x] * 5;
-                    // BINARY CODED DECIMAL OR SOMETHING
-                    // Convert a number into each of its digits, then store them
-                    // one by one at I, I+1 and I+2
-                    case 0x33 -> {
-                        int num = registers[x];
-                        memory[I] = (byte) (num / 100);
-                        memory[I+1] = (byte) ((num / 10) % 10);
-                        memory[I+2] = (byte) (num % 10);
-                    }
-                    // Store the values in registers V0 to VX inclusive
-                    // in contiguous spaces in memory starting from I
-                    // Some older versions incremented I as it did this
-                    // but this doesn't.
-                    case 0x55 -> {
-                        for (int i = 0; i <= x; i++) {
-                            memory[I+i] = (byte) registers[i];
-                        }
-                    }
-                    // The opposite of 0xFX55
-                    case 0x65 -> {
-                        for (int i = 0; i <= x; i++) {
-                            registers[i] = toInt(memory[I+i]); // Unsign it.
-                        }
-                    }
-                    default -> throw new CHIP8InvalidOpcodeError(opcode);
+        int x = registers[(opcode & 0x0F00) >> 8]; // Get VX
+        int y = registers[(opcode & 0x00F0) >> 4]; // Get VY
+        int height = opcode & 0x000F; // Get N
+
+        displayDrawPending = true;
+
+        registers[0xF] = drawSprite(x, y, 8, height);
+    }
+
+    protected void executeFInstruction(int opcode) {
+        // 0xFXNN: A bunch of stuff. Timers, key inputs, memory
+        int x = (opcode & 0x0F00) >> 8;
+        int nn = opcode & 0x00FF;
+
+        switch (nn) {
+            // Set VX to the delay timer
+            case 0x07 -> registers[x] = delayTimer & 0xFF;
+            // Set the delay timer to VX
+            case 0x15 -> delayTimer = registers[x];
+            // Set the sound timer to VX
+            case 0x18 -> soundTimer = registers[x];
+            // Add VX to I, and set VF to 1 if it would "overflow" above 0x0FFF
+            // It's not actually overflowing, but it shouldn't be any higher than that.
+            case 0x1E -> {
+                I += registers[x];
+                registers[0xF] = 0;
+
+                if (I > 0x0FFF) {
+                    I = 0x0FFF;
+                    registers[0xF] = 1;
+                }
+            }
+            // Halts until any key is pressed
+            // Puts its hex value in VX when it is pressed
+            case 0x0A -> {
+                int pressedKey = keypad.getPressedKey();
+
+                if (pressedKey == -1) {
+                    programCounter -= 2;
+                } else {
+                    registers[x] = x;
+                }
+            }
+            // Make I point to VX's character in the font
+            // Each character in the font is 5 bytes long
+            case 0x29 -> I = FONT_SET_START_ADDRESS + registers[x] * 5;
+            // BINARY CODED DECIMAL OR SOMETHING
+            // Convert a number into each of its digits, then store them
+            // one by one at I, I+1 and I+2
+            case 0x33 -> {
+                int num = registers[x];
+                memory[I] = (byte) (num / 100);
+                memory[I+1] = (byte) ((num / 10) % 10);
+                memory[I+2] = (byte) (num % 10);
+            }
+            // Store the values in registers V0 to VX inclusive
+            // in contiguous spaces in memory starting from I
+            // If the quirk is on, then the value of I gets incremented
+            // Otherwise, it stays the same
+            case 0x55 -> {
+                for (int i = 0; i <= x; i++) {
+                    memory[I+i] = (byte) registers[i];
+                }
+                if (isQuirkEnabled(Quirks.INCREMENT_I_ON_SAVE_LOAD)) {
+                   I += x + 1;
+                }
+            }
+            // The opposite of 0xFX55
+            case 0x65 -> {
+                for (int i = 0; i <= x; i++) {
+                    registers[i] = toInt(memory[I+i]); // Unsign it.
+                }
+                if (isQuirkEnabled(Quirks.INCREMENT_I_ON_SAVE_LOAD)) {
+                    I += x + 1;
                 }
             }
             default -> throw new CHIP8InvalidOpcodeError(opcode);
         }
     }
 
-    private int drawSprite(int x, int y, int height) {
+    protected void eightXYLogic(int x, int y, int n) {
+        switch (n) {
+            case 0x1 -> registers[x] |= registers[y]; // Set VX to VX OR VY
+            case 0x2 -> registers[x] &= registers[y]; // Set VX to VX AND VY
+            case 0x3 -> registers[x] ^= registers[y]; // Set VX to VX XOR VY
+        }
+        if (isQuirkEnabled(Quirks.RESET_VF_ON_LOGIC)) {
+            registers[0xF] = 0;
+        }
+    }
+
+    protected int drawSprite(int x, int y, int width, int height) {
         int pixelFlipped = 0; // VF register
 
-        for (int row = 0; row < height; row++) {
-            // Get the sprite byte from memory at address I + row
-            int spriteByte = toInt(memory[I + row]);
+        // Yep, the COSMAC VIP did it like this,
+        // so we're doing it like this
+        // Why would you even want to draw stuff outside
+        // the screen, just to have it draw in the screen?
+        // The inner machinations of CHIP-8 programmers are
+        // an enigma at best.
+        x %= display.getWidth();
+        y %= display.getHeight();
 
-            for (int col = 0; col < 8; col++) {
+        // width 8 sprites need one byte per row
+        // (one bit for each pixel)
+        // width 16 need two, and so on
+        int bytesPerRow = width / 8;
+
+        for (int row = 0; row < height; row++) {
+            for (int col = 0; col < width; col++) {
+                // Find where the byte actually is in memory
+                int byteIndex = I + row * bytesPerRow + col / 8;
+
+                // Get the sprite byte from memory at address byteIndex
+                int spriteByte = toInt(memory[byteIndex]);
+
                 // Check if the current bit in the sprite byte is set
-                if ((spriteByte & (0x80 >> col)) != 0) {
+                // We do `% 8` to wrap the bit positions within each byte
+                if ((spriteByte & (0x80 >> (col % 8))) != 0) {
                     // Calculate the pixel coordinates on the display
-                    int pixelX = (x + col) % Display.WIDTH;
-                    int pixelY = (y + row) % Display.HEIGHT;
+                    int pixelX = (x + col);
+                    int pixelY = (y + row);
+
+                    // If the CLIP_SPRITES quirk is on, sprites shouldn't
+                    // wrap around the screen and pixel should just be discarded
+                    // if not drawn to a valid position
+                    if (isQuirkEnabled(Quirks.CLIP_SPRITES)) {
+                        if (pixelX < 0 || pixelX >= display.getWidth() ||
+                        pixelY < 0 || pixelY >= display.getHeight()) {
+                            continue;
+                        }
+                    } else {
+                        // Wrap them around the screen otherwise
+                        pixelX %= display.getWidth();
+                        pixelY %= display.getHeight();
+                    }
 
                     // Get the current pixel state
                     boolean currentPixelState = display.getPixel(pixelX, pixelY);
@@ -484,8 +634,8 @@ public class Interpreter {
         return pixelFlipped;
     }
 
-
     // --- Loading ROMs ---
+
     public void loadROM(String filePath) throws IOException {
         // Load the ROM into memory starting at address 0x200
         byte[] romData = java.nio.file.Files.readAllBytes(Path.of(filePath));

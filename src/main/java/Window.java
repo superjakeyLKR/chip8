@@ -1,7 +1,10 @@
 import core.Display;
-import core.Interpreter;
+
 import core.InterpreterType;
 import core.Keypad;
+import core.Quirks;
+import core.interpreter.Chip8Interpreter;
+import core.interpreter.SuperCHIPInterpreter;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.opengl.GL;
@@ -10,7 +13,7 @@ import java.io.IOException;
 import java.util.logging.Logger;
 
 public class Window {
-    private Interpreter interpreter; // The CHIP-8 interpreter
+    private Chip8Interpreter interpreter; // The CHIP-8 interpreter
 
     private long window; // GLFW window handle
 
@@ -67,9 +70,8 @@ public class Window {
 
     public void selectInterpreter(InterpreterType interpreterType) {
         switch (interpreterType) {
-            case CHIP_8 -> interpreter = new Interpreter(display, keypad);
-            // TODO: Change this when the SUPER Interpreter is actually made
-            case SUPER_CHIP -> interpreter = new Interpreter(display, keypad);
+            case CHIP_8 -> interpreter = new Chip8Interpreter(display, keypad);
+            case SUPER_CHIP -> interpreter = new SuperCHIPInterpreter(display, keypad);
             default -> throw new IllegalArgumentException("Unknown interpreter: " + interpreterType.getDisplayName());
         }
     }
@@ -127,8 +129,10 @@ public class Window {
 
         double nextTimerUpdate = System.nanoTime() + TIMER_INTERVAL;
 
-        // Loop until the user closes the window
-        while (!GLFW.glfwWindowShouldClose(window)) {
+        GLFW.glfwSetWindowTitle(window, "CHIP-8 Emulator - " + currentROMPath);
+
+        // Loop until the user closes the window or the interpreter stops running
+        while (!GLFW.glfwWindowShouldClose(window) && interpreter.isRunning()) {
             // TESTING: Render a test pattern on the display
             // renderTest();
 
@@ -142,7 +146,7 @@ public class Window {
             // 700Hz is around the amount that an actual CHIP-8
             // running device would run at.
             while (currentTime - lastCycle >= CYCLE_TIME) {
-                interpreter.cycle(); // Execute one cycle of the CHIP-8 interpreter
+                interpreter.cycle(); // Execute one FDE cycle of the CHIP-8 interpreter
                 lastCycle += CYCLE_TIME;
             }
 
@@ -150,6 +154,9 @@ public class Window {
             // independent of the CPU's clock cycles
             while (currentTime >= nextTimerUpdate) {
                 interpreter.decrementTimers();
+
+                // So that it updates every 60hz
+                interpreter.displayDrawPending = false;
 
                 nextTimerUpdate += TIMER_INTERVAL;
             }

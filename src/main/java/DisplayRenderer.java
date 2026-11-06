@@ -12,11 +12,11 @@ public class DisplayRenderer {
         // CHIP-8 wants (0, 0) to be the top-left corner of the screen,
         // but OpenGL wants it to be the bottom-left corner.
         // So we flip the y-axis by setting the top to 0
-        // and the bottom to core.Display.HEIGHT * PIXEL_SIZE.
+        // and the bottom to core.Display.LOW_HEIGHT * PIXEL_SIZE.
         GL11.glOrtho(
                 0,
-                Display.WIDTH * PIXEL_SIZE,
-                Display.HEIGHT * PIXEL_SIZE,
+                Display.HIGH_WIDTH * PIXEL_SIZE,
+                Display.HIGH_HEIGHT * PIXEL_SIZE,
                 0,
                 -1,
                 1
@@ -42,15 +42,19 @@ public class DisplayRenderer {
         // Triangle shaped pixels aren't exactly ideal.
         GL11.glBegin(GL11.GL_QUADS);
 
-        for (int y = 0; y < Display.HEIGHT; y++) {
-            for (int x = 0; x < Display.WIDTH; x++) {
+        for (int y = 0; y < display.getHeight(); y++) {
+            for (int x = 0; x < display.getWidth(); x++) {
                 if (display.getPixel(x, y)) {
+                    // The pixels are bigger in low-res, so that the
+                    // windows take up the same size
+                    int pixelSize = PIXEL_SIZE * Display.HIGH_WIDTH / display.getWidth();
+
                     // Draw a pixel at the specified position
                     // These are each of the four corners of the rectangle that makes up the pixel
-                    GL11.glVertex2f(x * PIXEL_SIZE, y * PIXEL_SIZE); // Bottom-left corner
-                    GL11.glVertex2f((x + 1) * PIXEL_SIZE, y * PIXEL_SIZE); // Bottom-right corner
-                    GL11.glVertex2f((x + 1) * PIXEL_SIZE, (y + 1) * PIXEL_SIZE); // Top-right corner
-                    GL11.glVertex2f(x * PIXEL_SIZE, (y + 1) * PIXEL_SIZE); // Top-left corner
+                    GL11.glVertex2f(x * pixelSize, y * pixelSize); // Bottom-left corner
+                    GL11.glVertex2f((x + 1) * pixelSize, y * pixelSize); // Bottom-right corner
+                    GL11.glVertex2f((x + 1) * pixelSize, (y + 1) * pixelSize); // Top-right corner
+                    GL11.glVertex2f(x * pixelSize, (y + 1) * pixelSize); // Top-left corner
                 }
             }
         }
