@@ -5,6 +5,7 @@ import core.Keypad;
 import core.Quirks;
 import errors.CHIP8InterpreterError;
 import errors.CHIP8InvalidOpcodeError;
+import gui.EmulatorConfig;
 
 import java.awt.Toolkit;
 import java.io.IOException;
@@ -77,6 +78,14 @@ public class Chip8Interpreter {
         }
     }
 
+    public void loadQuirks(EmulatorConfig emulatorConfig) {
+        quirks = emulatorConfig.getQuirks();
+    }
+
+    public void loadQuirks(EnumMap<Quirks, Boolean> quirks) {
+        this.quirks = quirks;
+    }
+
     // --- Memory ---
 
     public static final int MEMORY_SIZE = 4096; // 4KB of memory
@@ -134,7 +143,7 @@ public class Chip8Interpreter {
     // I could have used a short[] array for the stack,
     // ints are just more convenient to work with.
     // The memory usage is negligible anyway.
-    private int[] stack = new int[STACK_SIZE];
+    private final int[] stack = new int[STACK_SIZE];
     private int stackPointer = 0; // Points to the top of the stack
 
     private void push(int address) {

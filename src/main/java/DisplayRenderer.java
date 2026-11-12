@@ -3,7 +3,8 @@ import org.lwjgl.opengl.GL11;
 
 public class DisplayRenderer {
     public static final int PIXEL_SIZE = 10; // Size of each pixel in the display
-    public static final float[] PIXEL_COLOUR = {0f, 1f, 0f}; // RGB colour for the pixels (green)
+    public static float[] PIXEL_COLOUR = {0f, 1f, 0f}; // RGB colour for the pixels (green)
+    public static float[] BG_COLOUR = {0f, 1f, 0f}; // RGB colour for the background (black)
 
     public void init() {
         GL11.glMatrixMode(GL11.GL_PROJECTION);
@@ -28,8 +29,8 @@ public class DisplayRenderer {
 
 
     public void render(Display display) {
-        // Clear the screen to black
-        GL11.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        // Clear the screen to whatever the background colour is
+        clear();
         // Clear the framebuffer
         // This is because whatever was drawn on the previous frame
         // is still there, so we need to clear it before drawing the next frame.
@@ -61,5 +62,14 @@ public class DisplayRenderer {
 
         // Tell OpenGL that we're done drawing the pixels
         GL11.glEnd();
+    }
+
+    private void clear() {
+        GL11.glClearColor(
+                BG_COLOUR[0],
+                BG_COLOUR[1],
+                BG_COLOUR[2],
+                1f
+        );
     }
 }

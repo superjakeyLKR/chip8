@@ -2,9 +2,9 @@ import core.Display;
 
 import core.InterpreterType;
 import core.Keypad;
-import core.Quirks;
 import core.interpreter.Chip8Interpreter;
 import core.interpreter.SuperCHIPInterpreter;
+import gui.EmulatorConfig;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.opengl.GL;
@@ -31,16 +31,6 @@ public class Window {
         keypad = new Keypad();
     }
 
-    // Assumes CHIP-8 interpreter by default
-    public Window(String filePath) {
-        display = new Display();
-        displayRenderer = new DisplayRenderer();
-        keypad = new Keypad();
-
-        selectInterpreter(InterpreterType.CHIP_8);
-        loadROM(filePath);
-    }
-
     public Window(String interpreter, String filePath) {
         display = new Display();
         displayRenderer = new DisplayRenderer();
@@ -48,6 +38,17 @@ public class Window {
 
         selectInterpreter(interpreter);
         loadROM(filePath);
+    }
+
+    public Window(String interpreter, String filePath, EmulatorConfig emulatorConfig) {
+        display = new Display();
+        displayRenderer = new DisplayRenderer();
+        keypad = new Keypad();
+
+        selectInterpreter(interpreter);
+        loadROM(filePath);
+
+        updateConfigValues(emulatorConfig);
     }
 
     public String currentROMPath;
@@ -74,6 +75,13 @@ public class Window {
             case SUPER_CHIP -> interpreter = new SuperCHIPInterpreter(display, keypad);
             default -> throw new IllegalArgumentException("Unknown interpreter: " + interpreterType.getDisplayName());
         }
+    }
+
+    public void updateConfigValues(EmulatorConfig emulatorConfig) {
+        DisplayRenderer.PIXEL_COLOUR = emulatorConfig.getDisplayColour();
+        DisplayRenderer.BG_COLOUR = emulatorConfig.getBgColour();
+
+        interpreter.loadQuirks(emulatorConfig);
     }
 
     public void run() {
